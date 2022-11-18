@@ -13,6 +13,7 @@ DIR_DIST = dist
 
 DISTS = \
 	$(DIR_DIST)/dynamodb-load \
+	$(DIR_DIST)/dynamodb-load-same-partition-batch \
 	$(DIR_DIST)/gen
 
 TARGETS = $(DISTS)
@@ -27,6 +28,9 @@ all: $(TARGETS)
 clean:
 	/bin/rm -f $(TARGETS)
 	@echo "$@ done." 1>&2
+
+$(DIR_DIST)/dynamodb-load-same-partition-batch: cmd/dynamodb-load-same-partition-batch/* $(SRCS_OTHER)
+	$(GO_BUILD) -o $@ ./cmd/dynamodb-load-same-partition-batch/
 
 $(DIR_DIST)/dynamodb-load: cmd/dynamodb-load/* $(SRCS_OTHER)
 	$(GO_BUILD) -o $@ ./cmd/dynamodb-load/
