@@ -16,6 +16,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
+	"github.com/dustin/go-humanize"
 	"github.com/guregu/dynamo"
 	"github.com/hashicorp/go-multierror"
 	"golang.org/x/sync/errgroup"
@@ -28,6 +29,7 @@ var (
 	optSequence       = flag.Int64("sequence", 0, "sequence number to start from")
 	optPutWorkers     = flag.Int("put-workers", 10, "number of workers to put items")
 	optVersion        = flag.Bool("version", false, "show version")
+	optChanLength     = flag.Int("chan-length", 20, "length of channel to put items")
 )
 
 var version string
@@ -74,24 +76,26 @@ func run() error {
 	from := time.Now()
 	seq := *optSequence
 
-	chPut := make(chan Record, *optPutWorkers*2)
+	chPut := make(chan Record, *optChanLength)
 	egPut, ctxPut := errgroup.WithContext(ctx)
 	for i := 0; i < *optPutWorkers; i++ {
 		i := i
 		ctx := ctxPut
 		egPut.Go(func() (retErr error) {
+			count := 0
 			defer func() {
 				if retErr != nil {
 					cancel()
 				}
-				log.Printf("[%d]put: done: err=%v", i, retErr)
+				log.Printf("[%d]put: done: count=%s, err=%v", i, humanize.Comma(int64(count)), retErr)
 			}()
 
 			// https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_BatchWriteItem.html
 			// up to 25 operations per request
 			recs := make([]interface{}, 0, 25)
 			flush := func() error {
-				if len(recs) == 0 {
+				l := len(recs)
+				if l == 0 {
 					return nil
 				}
 				_, err := cli.Table(*optTable).Batch().Write().Put(recs...).RunWithContext(ctx)
@@ -99,9 +103,11 @@ func run() error {
 					return err
 				}
 				recs = recs[:0]
+				count += l
 				return nil
 			}
 
+			c := cap(recs)
 		loop:
 			for {
 				select {
@@ -112,7 +118,7 @@ func run() error {
 						break loop
 					}
 					recs = append(recs, e)
-					if len(recs) == cap(recs) {
+					if len(recs) == c {
 						if err := flush(); err != nil {
 							return err
 						}
@@ -136,20 +142,17 @@ func run() error {
 			r := csv.NewReader(fp)
 			r.Comma = '\t'
 
-			for i := 0; ; i++ {
+			lc := 0
+			for {
 				record, err := r.Read()
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					break
 				}
 				if err != nil {
 					return fmt.Errorf("Read: %w", err)
 				}
 
-				if i == 0 {
-					// skip header
-					continue
-				}
-
+				lc++
 				content := record[1]
 
 				nextSeq := atomic.AddInt64(&seq, 1)
@@ -169,9 +172,11 @@ func run() error {
 				}
 
 				if nextSeq%1000 == 0 {
-					log.Printf("%s: Posted %d recs", fn, nextSeq)
+					log.Printf("%s: Posted %s recs", fn, humanize.Comma(nextSeq))
 				}
 			}
+
+			log.Printf("Total %s recs", humanize.Comma(int64(lc)))
 
 			return nil
 		}(); err != nil {

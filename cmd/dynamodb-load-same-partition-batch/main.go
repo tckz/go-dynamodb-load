@@ -16,6 +16,7 @@ import (
 
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/dynamodb"
+	"github.com/dustin/go-humanize"
 	"github.com/guregu/dynamo"
 	"github.com/hashicorp/go-multierror"
 	"golang.org/x/sync/errgroup"
@@ -98,7 +99,7 @@ func run() error {
 				if retErr != nil {
 					cancel()
 				}
-				log.Printf("[%d]put: done: count=%d, err=%v", i, count, retErr)
+				log.Printf("[%d]put: done: count=%s, err=%v", i, humanize.Comma(int64(count)), retErr)
 			}()
 
 			// https://docs.aws.amazon.com/amazondynamodb/latest/APIReference/API_BatchWriteItem.html
@@ -184,10 +185,10 @@ func run() error {
 				}
 
 				if nextSeq%1000 == 0 {
-					log.Printf("%s: Posted %d recs", fn, nextSeq)
+					log.Printf("%s: Posted %s recs", fn, humanize.Comma(nextSeq))
 				}
 			}
-			log.Printf("Total %d recs", lc)
+			log.Printf("Total %s recs", humanize.Comma(int64(lc)))
 
 			return nil
 		}(); err != nil {
